@@ -24,6 +24,12 @@
 
         <section v-if="event.ticketTiers?.length" class="event-detail__tickets">
           <h2>Tickets</h2>
+
+          <div v-if="reservationStore.isActive" class="reserve-notice">
+            You have an active hold.
+            <RouterLink to="/checkout" class="reserve-notice__link">Continue to checkout →</RouterLink>
+          </div>
+
           <div class="tier-list">
             <div v-for="tier in event.ticketTiers" :key="tier.id" class="tier">
               <div class="tier__info">
@@ -37,18 +43,29 @@
                 <button
                   class="tier__qty-btn"
                   aria-label="Decrease quantity"
-                  :disabled="quantities[tier.id] <= 0"
+                  :disabled="quantities[tier.id] <= 0 || reservationStore.isActive"
                   @click="decrement(tier)"
                 >−</button>
                 <span class="tier__qty-value">{{ quantities[tier.id] }}</span>
                 <button
                   class="tier__qty-btn"
                   aria-label="Increase quantity"
-                  :disabled="quantities[tier.id] >= maxQty(tier)"
+                  :disabled="quantities[tier.id] >= maxQty(tier) || reservationStore.isActive"
                   @click="increment(tier)"
                 >+</button>
               </div>
             </div>
+          </div>
+
+          <div v-if="totalSelected > 0 && !reservationStore.isActive" class="reserve-bar">
+            <p v-if="reserveError" class="reserve-bar__error">{{ reserveError }}</p>
+            <button
+              class="reserve-bar__btn"
+              :disabled="reserving"
+              @click="reserve"
+            >
+              {{ reserving ? 'Reserving…' : `Reserve ${totalSelected} ticket${totalSelected !== 1 ? 's' : ''}` }}
+            </button>
           </div>
         </section>
       </div>
@@ -58,14 +75,21 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { fetchEventBySlug } from '../api/events.js'
+import { createReservation, releaseReservation } from '../api/reservations.js'
+import { useReservationStore } from '../stores/reservation.js'
 
 const route = useRoute()
+const router = useRouter()
+const reservationStore = useReservationStore()
+
 const event = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const quantities = ref({})
+const reserving = ref(false)
+const reserveError = ref(null)
 
 onMounted(async () => {
   try {
@@ -119,6 +143,47 @@ function increment(tier) {
 
 function decrement(tier) {
   if (quantities.value[tier.id] > 0) quantities.value[tier.id]--
+}
+
+const totalSelected = computed(() =>
+  Object.values(quantities.value).reduce((sum, q) => sum + q, 0),
+)
+
+async function reserve() {
+  const selectedTiers = (event.value?.ticketTiers ?? []).filter(
+    t => quantities.value[t.id] > 0,
+  )
+  if (!selectedTiers.length) return
+
+  reserving.value = true
+  reserveError.value = null
+  const createdUuids = []
+
+  try {
+    const items = []
+    for (const tier of selectedTiers) {
+      const qty = quantities.value[tier.id]
+      const result = await createReservation(tier.id, qty)
+      createdUuids.push(result.uuid)
+      items.push({
+        uuid: result.uuid,
+        expiresAt: result.expiresAt,
+        tierId: tier.id,
+        tierName: tier.name,
+        quantity: qty,
+        price: tier.price,
+        currency: tier.currency,
+      })
+    }
+    reservationStore.set(items)
+    router.push('/checkout')
+  } catch (e) {
+    // Roll back any holds that were successfully created before the failure
+    await Promise.allSettled(createdUuids.map(releaseReservation))
+    reserveError.value = e.message
+  } finally {
+    reserving.value = false
+  }
 }
 </script>
 
@@ -268,6 +333,57 @@ function decrement(tier) {
   min-width: 24px;
   text-align: center;
   font-family: var(--mono);
+}
+
+.reserve-notice {
+  font-size: 14px;
+  color: var(--text);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  max-width: 680px;
+}
+
+.reserve-notice__link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.reserve-bar {
+  margin-top: 20px;
+  max-width: 680px;
+}
+
+.reserve-bar__error {
+  color: #e53e3e;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.reserve-bar__btn {
+  width: 100%;
+  padding: 14px 24px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.reserve-bar__btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.reserve-bar__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 @media (max-width: 1024px) {
