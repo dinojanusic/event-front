@@ -90,21 +90,25 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { RouterLink, onBeforeRouteLeave } from 'vue-router'
-import { useReservation } from '../composables/useReservation.js'
-import { placeOrder as apiPlaceOrder, releaseReservation } from '../api/reservations.js'
+import { useReservation } from '../composables/useReservation'
+import {
+  placeOrder as apiPlaceOrder,
+  releaseReservation,
+  ReservationExpiredError,
+} from '../api/reservations'
 
 const { secondsLeft, countdownDisplay, expired, store } = useReservation()
 
 const email = ref('')
 const placing = ref(false)
-const orderError = ref(null)
+const orderError = ref<string | null>(null)
 const confirmed = ref(false)
-const orderNumber = ref(null)
+const orderNumber = ref<string | null>(null)
 
-function formatPrice(amount, currency) {
+function formatPrice(amount: number | null, currency: string): string {
   if (amount == null || amount === 0) return 'Free'
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -112,7 +116,7 @@ function formatPrice(amount, currency) {
   }).format(amount)
 }
 
-function formatTotal() {
+function formatTotal(): string {
   const items = store.items
   if (!items.length) return ''
   const currency = items[0].currency ?? 'USD'
@@ -120,12 +124,12 @@ function formatTotal() {
   return formatPrice(total, currency)
 }
 
-async function placeOrder() {
+async function placeOrder(): Promise<void> {
   placing.value = true
   orderError.value = null
 
   try {
-    let lastOrderNumber = null
+    let lastOrderNumber: string | null = null
     // Backend is one-reservation-per-order; place sequentially for multi-tier
     for (const item of store.items) {
       const data = await apiPlaceOrder(item.uuid, email.value)
@@ -135,11 +139,11 @@ async function placeOrder() {
     orderNumber.value = lastOrderNumber
     confirmed.value = true
   } catch (e) {
-    if (e.code === 'RESERVATION_EXPIRED') {
+    if (e instanceof ReservationExpiredError) {
       store.clear()
       expired.value = true
     } else {
-      orderError.value = e.message
+      orderError.value = e instanceof Error ? e.message : String(e)
     }
   } finally {
     placing.value = false

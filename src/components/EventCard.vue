@@ -12,12 +12,11 @@
   </RouterLink>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
+import type { Event } from '../types'
 
-const props = defineProps({
-  event: { type: Object, required: true },
-})
+const props = defineProps<{ event: Event }>()
 
 const formattedDate = computed(() => {
   if (!props.event.startDate) return 'Date TBA'

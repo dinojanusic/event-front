@@ -14,20 +14,21 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import EventCard from '../components/EventCard.vue'
-import { fetchEvents } from '../api/events.js'
+import { fetchEvents } from '../api/events'
+import type { Event } from '../types'
 
-const events = ref([])
+const events = ref<Event[]>([])
 const loading = ref(true)
-const error = ref(null)
+const error = ref<string | null>(null)
 
 onMounted(async () => {
   try {
     events.value = await fetchEvents()
   } catch (e) {
-    error.value = e.message
+    error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }

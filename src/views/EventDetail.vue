@@ -31,15 +31,29 @@
           </div>
 
           <div class="tier-list">
-            <div v-for="tier in event.ticketTiers" :key="tier.id" class="tier">
+            <div
+              v-for="tier in event.ticketTiers"
+              :key="tier.id"
+              class="tier"
+              :class="{ 'tier--soldout': tier.available === 0 }"
+            >
               <div class="tier__info">
                 <p class="tier__name">{{ tier.name }}</p>
                 <p class="tier__price">{{ formatPrice(tier.price, tier.currency) }}</p>
                 <p v-if="tier.salesEnd" class="tier__window">
                   Sale ends {{ formatDate(tier.salesEnd) }}
                 </p>
+                <p v-if="tier.available === 0" class="tier__availability tier__availability--soldout">
+                  Sold out
+                </p>
+                <p v-else-if="tier.available != null && tier.available <= 10" class="tier__availability tier__availability--low">
+                  Only {{ tier.available }} left
+                </p>
+                <p v-else-if="tier.available != null" class="tier__availability">
+                  {{ tier.available }} remaining
+                </p>
               </div>
-              <div class="tier__qty">
+              <div v-if="tier.available !== 0" class="tier__qty">
                 <button
                   class="tier__qty-btn"
                   aria-label="Decrease quantity"
@@ -73,32 +87,33 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { fetchEventBySlug } from '../api/events.js'
-import { createReservation, releaseReservation } from '../api/reservations.js'
-import { useReservationStore } from '../stores/reservation.js'
+import { fetchEventBySlug } from '../api/events'
+import { createReservation, releaseReservation } from '../api/reservations'
+import { useReservationStore } from '../stores/reservation'
+import type { Event, Tier, ReservationItem } from '../types'
 
 const route = useRoute()
 const router = useRouter()
 const reservationStore = useReservationStore()
 
-const event = ref(null)
+const event = ref<Event | null>(null)
 const loading = ref(true)
-const error = ref(null)
-const quantities = ref({})
+const error = ref<string | null>(null)
+const quantities = ref<Record<string, number>>({})
 const reserving = ref(false)
-const reserveError = ref(null)
+const reserveError = ref<string | null>(null)
 
 onMounted(async () => {
   try {
-    event.value = await fetchEventBySlug(route.params.slug)
+    event.value = await fetchEventBySlug(route.params.slug as string)
     for (const tier of event.value.ticketTiers ?? []) {
       quantities.value[tier.id] = 0
     }
   } catch (e) {
-    error.value = e.message
+    error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }
@@ -106,7 +121,7 @@ onMounted(async () => {
 
 const formattedDates = computed(() => {
   if (!event.value?.startDate) return 'Date TBA'
-  const fmt = d =>
+  const fmt = (d: string) =>
     new Date(d).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
@@ -117,7 +132,7 @@ const formattedDates = computed(() => {
   return `${start} – ${fmt(event.value.endDate)}`
 })
 
-function formatPrice(price, currency) {
+function formatPrice(price: number | null, currency: string): string {
   if (price == null) return 'Free'
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -125,7 +140,7 @@ function formatPrice(price, currency) {
   }).format(price)
 }
 
-function formatDate(dt) {
+function formatDate(dt: string): string {
   return new Date(dt).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -133,15 +148,17 @@ function formatDate(dt) {
   })
 }
 
-function maxQty(tier) {
-  return tier.quota != null ? Math.min(tier.quota, 10) : 10
+function maxQty(tier: Tier): number {
+  // Cap at live available count first, then static quota, then hard UI max of 10.
+  const cap = tier.available ?? tier.quota ?? Infinity
+  return Math.min(cap, 10)
 }
 
-function increment(tier) {
+function increment(tier: Tier): void {
   if (quantities.value[tier.id] < maxQty(tier)) quantities.value[tier.id]++
 }
 
-function decrement(tier) {
+function decrement(tier: Tier): void {
   if (quantities.value[tier.id] > 0) quantities.value[tier.id]--
 }
 
@@ -149,7 +166,7 @@ const totalSelected = computed(() =>
   Object.values(quantities.value).reduce((sum, q) => sum + q, 0),
 )
 
-async function reserve() {
+async function reserve(): Promise<void> {
   const selectedTiers = (event.value?.ticketTiers ?? []).filter(
     t => quantities.value[t.id] > 0,
   )
@@ -157,10 +174,10 @@ async function reserve() {
 
   reserving.value = true
   reserveError.value = null
-  const createdUuids = []
+  const createdUuids: string[] = []
 
   try {
-    const items = []
+    const items: ReservationItem[] = []
     for (const tier of selectedTiers) {
       const qty = quantities.value[tier.id]
       const result = await createReservation(tier.id, qty)
@@ -171,7 +188,7 @@ async function reserve() {
         tierId: tier.id,
         tierName: tier.name,
         quantity: qty,
-        price: tier.price,
+        price: tier.price ?? 0,
         currency: tier.currency,
       })
     }
@@ -180,7 +197,7 @@ async function reserve() {
   } catch (e) {
     // Roll back any holds that were successfully created before the failure
     await Promise.allSettled(createdUuids.map(releaseReservation))
-    reserveError.value = e.message
+    reserveError.value = e instanceof Error ? e.message : String(e)
   } finally {
     reserving.value = false
   }
@@ -290,6 +307,29 @@ async function reserve() {
 .tier__window {
   font-size: 13px;
   color: var(--text);
+}
+
+.tier__availability {
+  font-size: 13px;
+  color: var(--text);
+  margin-top: 6px;
+}
+
+.tier__availability--low {
+  color: #d97706;
+  font-weight: 500;
+}
+
+.tier__availability--soldout {
+  color: #e53e3e;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+}
+
+.tier--soldout {
+  opacity: 0.6;
 }
 
 .tier__qty {

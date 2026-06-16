@@ -1,7 +1,6 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useReservationStore } from '../stores/reservation.js'
-import { releaseReservation } from '../api/reservations.js'
-
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useReservationStore } from '../stores/reservation';
+import { releaseReservation } from '../api/reservations';
 /**
  * Lifecycle contract:
  *
@@ -27,50 +26,44 @@ import { releaseReservation } from '../api/reservations.js'
  *   countdown from wherever it left off.
  */
 export function useReservation() {
-  const store = useReservationStore()
-  const secondsLeft = ref(0)
-  const expired = ref(false)
-  let intervalId = null
-
-  function computeSeconds() {
-    if (!store.expiresAt) return 0
-    return Math.max(0, Math.floor(store.expiresAt - Date.now() / 1000))
-  }
-
-  async function handleExpiry() {
-    clearInterval(intervalId)
-    intervalId = null
-
-    const uuids = store.items.map(i => i.uuid)
-    store.clear()
-    expired.value = true
-
-    await Promise.allSettled(uuids.map(releaseReservation))
-  }
-
-  function tick() {
-    secondsLeft.value = computeSeconds()
-    if (secondsLeft.value === 0) handleExpiry()
-  }
-
-  onMounted(() => {
-    secondsLeft.value = computeSeconds()
-    if (secondsLeft.value > 0) {
-      intervalId = setInterval(tick, 1000)
-    } else if (store.hasReservation) {
-      handleExpiry()
+    const store = useReservationStore();
+    const secondsLeft = ref(0);
+    const expired = ref(false);
+    let intervalId = null;
+    function computeSeconds() {
+        if (!store.expiresAt)
+            return 0;
+        return Math.max(0, Math.floor(store.expiresAt - Date.now() / 1000));
     }
-  })
-
-  onUnmounted(() => {
-    clearInterval(intervalId)
-  })
-
-  const countdownDisplay = computed(() => {
-    const m = Math.floor(secondsLeft.value / 60)
-    const s = secondsLeft.value % 60
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  })
-
-  return { secondsLeft, countdownDisplay, expired, store }
+    async function handleExpiry() {
+        clearInterval(intervalId ?? undefined);
+        intervalId = null;
+        const uuids = store.items.map(i => i.uuid);
+        store.clear();
+        expired.value = true;
+        await Promise.allSettled(uuids.map(releaseReservation));
+    }
+    function tick() {
+        secondsLeft.value = computeSeconds();
+        if (secondsLeft.value === 0)
+            handleExpiry();
+    }
+    onMounted(() => {
+        secondsLeft.value = computeSeconds();
+        if (secondsLeft.value > 0) {
+            intervalId = setInterval(tick, 1000);
+        }
+        else if (store.hasReservation) {
+            handleExpiry();
+        }
+    });
+    onUnmounted(() => {
+        clearInterval(intervalId ?? undefined);
+    });
+    const countdownDisplay = computed(() => {
+        const m = Math.floor(secondsLeft.value / 60);
+        const s = secondsLeft.value % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    });
+    return { secondsLeft, countdownDisplay, expired, store };
 }
