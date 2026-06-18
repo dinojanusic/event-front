@@ -1,6 +1,6 @@
 import type { ReservationResult, OrderResult } from '../types'
 
-const BASE = '/api/v1'
+const BASE = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
 
 export class ReservationExpiredError extends Error {
   readonly code = 'RESERVATION_EXPIRED' as const
