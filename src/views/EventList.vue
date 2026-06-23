@@ -44,7 +44,6 @@ import { ref, onMounted } from "vue";
 import EventCard from "../components/EventCard.vue";
 import { fetchEvents } from "../api/events";
 import type { Event } from "../types";
-import heroAssetUrl from "../assets/hero.png";
 
 const events = ref<Event[]>([]);
 const loading = ref(true);
