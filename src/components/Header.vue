@@ -21,7 +21,9 @@
         <span>Eventful</span>
       </RouterLink>
 
-      <nav class="site-header__nav"></nav>
+      <nav class="site-header__nav">
+        <RouterLink to="/my-tickets" class="site-header__link">Find my tickets</RouterLink>
+      </nav>
     </div>
   </header>
 </template>
