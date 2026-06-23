@@ -10,22 +10,31 @@ Vue 3 single-page application for the Event ticketing platform. Handles event br
 |---|---|
 | Framework | Vue 3.5 (`<script setup>`) |
 | Build tool | Vite 8 |
+| Language | TypeScript |
 | State management | Pinia 3 |
 | Routing | Vue Router 5 |
 | HTTP | Native `fetch` (thin wrappers in `src/api/`) |
-| Persistence | `sessionStorage` (reservation cart) |
+| Persistence | `sessionStorage` (reservation cart, admin key) |
 
-No UI component library. No TypeScript. Minimal dependencies by design.
+No UI component library. Minimal dependencies by design.
 
 ---
 
 ## Pages and Routing
 
 ```
-/                    EventList   — grid of published events
-/events/:slug        EventDetail — event info, ticket tier selector, reserve button
-/checkout            Checkout    — order summary, countdown timer, order form
+/                    EventList        — grid of published events
+/events/:slug        EventDetail      — event info, ticket tier selector, reserve button
+/checkout            Checkout         — order summary, countdown timer, order form
+/my-tickets          MyTickets        — buyer order lookup by order number + email
+
+/admin/login         AdminLogin       — staff API-key gate
+/admin/orders        AdminOrders      — paginated order list with status filter
+/admin/orders/:id    AdminOrderDetail — order detail + cancel action
+/admin/inventory     AdminInventory   — live inventory table with utilization bar per tier
 ```
+
+The `/admin` prefix is protected by a `beforeEnter` navigation guard that redirects to `/admin/login` when no key is held in the `admin` Pinia store.
 
 ---
 
@@ -152,11 +161,41 @@ The backend's 10-minute Redis TTL is the authoritative expiry. The client-side `
 
 ```
 src/api/
-├── events.js        getEvents(), getEvent(slug)
-└── reservations.js  createReservation(tierId, qty), releaseReservation(uuid)
+├── events.ts        getEvents(), getEvent(slug)
+├── reservations.ts  createReservation(tierId, qty), releaseReservation(uuid)
+├── orders.ts        fetchOrder(orderNumber, email) — buyer ticket lookup; throws OrderNotFoundError on 404
+└── admin.ts         fetchAdminOrders(), fetchAdminOrder(), cancelAdminOrder(), fetchInventory()
+                     All functions accept the admin key as first argument and attach it as X-Admin-Key.
+                     Throws AdminAuthError on 401 so callers can redirect to /admin/login.
 ```
 
-Order creation is called directly from `Checkout.vue` using `fetch` to avoid coupling the API module to the order flow.
+`src/types.ts` contains all shared TypeScript interfaces (`Event`, `Tier`, `ReservationItem`, `OrderDetail`, `AdminOrder`, `AdminOrderDetail`, `InventoryTier`, `PaginatedResponse<T>`).
+
+---
+
+## Admin Panel
+
+The admin section lives under `/admin` and is guarded by a session-scoped API key stored in the `admin` Pinia store (`src/stores/admin.ts`). The key is persisted to `sessionStorage` under `admin:key` so it survives page refreshes but is automatically cleared when the tab closes.
+
+**Login flow:** `AdminLogin.vue` validates the key by attempting a real API call (`GET /admin/orders`). If the backend returns `401`, the `AdminAuthError` is shown inline. On success the key is saved and the router navigates to `AdminOrders`.
+
+**Session expiry:** Every admin API call wraps the response through a shared `handleResponse<T>` helper. A `401` at any point clears the store and redirects back to `/admin/login`.
+
+### Admin views
+
+| View | Route | Description |
+|---|---|---|
+| `AdminOrders` | `/admin/orders` | Paginated order table with status filter (all/confirmed/cancelled/pending/expired). Clicking a row navigates to the detail view. |
+| `AdminOrderDetail` | `/admin/orders/:orderNumber` | Full order card with cancel button. Cancel disables the button and shows inline feedback. |
+| `AdminInventory` | `/admin/inventory` | Per-tier table showing quota, sold, available, and a colour-coded utilisation bar (green < 60%, amber 60–90%, red ≥ 90%). Manual Refresh button re-fetches live Redis counters. |
+
+---
+
+## My Tickets
+
+`MyTickets.vue` (`/my-tickets`) is a buyer self-service lookup page. Users enter their order number and the email used at checkout. The form calls `GET /api/v1/orders/{orderNumber}?email=…`. The backend returns the order only when the email matches — preventing order number enumeration.
+
+Three states are rendered: `form` (initial), `not-found` (404 response), and `result` (order detail card with event date, venue, tier, quantity, total, and status).
 
 ---
 
@@ -165,17 +204,31 @@ Order creation is called directly from `Checkout.vue` using `fetch` to avoid cou
 ```
 src/
 ├── api/
-│   ├── events.js
-│   └── reservations.js
+│   ├── events.ts
+│   ├── reservations.ts
+│   ├── orders.ts            # buyer order lookup
+│   └── admin.ts             # staff endpoints + AdminAuthError
 ├── composables/
-│   └── useReservation.js   # countdown, expiry handling
+│   └── useReservation.ts    # countdown, expiry handling
 ├── stores/
-│   └── reservation.js      # Pinia store + sessionStorage sync
+│   ├── reservation.ts       # Pinia store + sessionStorage sync
+│   └── admin.ts             # admin key store + sessionStorage sync
 ├── views/
 │   ├── EventList.vue
 │   ├── EventDetail.vue
-│   └── Checkout.vue
+│   ├── Checkout.vue
+│   ├── MyTickets.vue
+│   └── admin/
+│       ├── AdminLayout.vue
+│       ├── AdminLogin.vue
+│       ├── AdminOrders.vue
+│       ├── AdminOrderDetail.vue
+│       └── AdminInventory.vue
+├── components/
+│   ├── Header.vue
+│   └── EventCard.vue
 ├── router/
-│   └── index.js
+│   └── index.ts
+├── types.ts                 # shared TypeScript interfaces
 └── App.vue
 ```
