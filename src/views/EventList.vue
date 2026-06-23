@@ -49,7 +49,6 @@ import heroAssetUrl from "../assets/hero.png";
 const events = ref<Event[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
-const heroAsset = heroAssetUrl || null;
 
 onMounted(async () => {
   try {
